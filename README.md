@@ -1,194 +1,346 @@
 Delayed-SDE Control Benchmark
 
-Reproducible Numerical Verification and Stochastic Optimization of a Delayed SDE Control System
+Reproducible Numerical Verification and Stochastic Optimization of a Delayed Stochastic Control System
 
-This repository provides a reproducible numerical benchmark for a linear stochastic differential system with discrete delayed proportional-derivative (PD) control.
+This repository presents a reproducible numerical benchmark for a stochastic dynamical system controlled by a discrete proportional-derivative (PD) controller with a finite control delay.
 
-The primary objective is not to establish a general optimal-control theorem, but to construct and numerically audit a complete computational pipeline in which the implemented dynamics, delayed controller, finite-dimensional augmented representation, analytical moment oracle, automatic differentiation, Monte Carlo estimation, timestep refinement, stability diagnostics, stochastic optimization, and independent out-of-sample evaluation are mutually consistent.
+The study focuses on numerical consistency, analytical verification, reproducibility, and independent out-of-sample evaluation rather than on claiming a general optimal-control theorem.
 
-The implementation is written in JAX with 64-bit floating-point arithmetic and is designed to make the numerical assumptions, verification procedures, and claim boundaries explicit.
+The computational pipeline combines:
 
----
+- an explicit delayed stochastic model;
+- Euler--Maruyama discretization;
+- a finite-dimensional augmented-state representation;
+- an exact finite-horizon linear-Gaussian moment oracle;
+- Monte Carlo verification;
+- automatic-differentiation verification;
+- Monte Carlo scaling analysis;
+- timestep refinement;
+- discrete stability and stationary-moment analysis;
+- stochastic projected-gradient optimization;
+- frozen-candidate independent out-of-sample evaluation.
 
-1. Model
-
-We consider the delayed stochastic system
-
-$$
-dx_t = \left( -\gamma x_t + u_{t-\tau} \right)dt + \sigma\,dW_t,
-$$
-
-where
-
-- $x_t$ is the scalar system state,
-- $u_t$ is the control input,
-- $\gamma > 0$ is the linear damping coefficient,
-- $\sigma \geq 0$ is the noise amplitude,
-- $W_t$ is a standard Wiener process,
-- $\tau \geq 0$ is the control delay.
-
-The tracking error is defined as
-
-$$
-e_k = x_k - x^\star,
-$$
-
-where $x^\star$ is the prescribed reference target.
-
-The discrete PD controller is
-
-$$
-u_k = -K_p e_k - K_d \frac{e_k - e_{k-1}}{\Delta t}.
-$$
-
-The delay is represented on the numerical grid by
-
-$$
-\tau = D\Delta t, \qquad D \in \mathbb{N}.
-$$
+The implementation is written in JAX with 64-bit floating-point arithmetic.
 
 ---
 
-2. Numerical Discretization
+1. Research Objective
+
+The central computational question is:
+
+«Can a delayed stochastic control system be implemented in a way that is internally consistent with an analytically tractable finite-dimensional representation, while allowing reproducible gradient-based optimization and independent numerical validation?»
+
+The benchmark is deliberately constructed so that several components can be checked independently.
+
+The verification hierarchy is
+
+$$
+\text{model}
+\rightarrow
+\text{discretization}
+\rightarrow
+\text{implementation}
+\rightarrow
+\text{analytical oracle}
+\rightarrow
+\text{numerical verification}
+\rightarrow
+\text{optimization}
+\rightarrow
+\text{independent OOS evaluation}.
+$$
+
+The objective is therefore methodological as well as computational: each numerical claim is tied to an explicit verification stage.
+
+---
+
+2. Mathematical Model
+
+We consider the delayed stochastic differential equation
+
+$$
+dx_t
+
+\left(
+-\gamma x_t
++
+u_{t-\tau}
+\right)dt
++
+\sigma,dW_t,
+$$
+
+where:
+
+- $x_t$ is the scalar system state;
+- $u_t$ is the control input;
+- $\gamma>0$ is the damping coefficient;
+- $\sigma\geq0$ is the noise amplitude;
+- $W_t$ is a standard Wiener process;
+- $\tau\geq0$ is the control delay.
+
+The tracking error at discrete time $k$ is
+
+$$
+e_k=x_k-x^\star,
+$$
+
+where $x^\star$ is the prescribed target.
+
+The discrete proportional-derivative controller is
+
+$$
+u_k
+
+-K_p e_k
+
+K_d
+\frac{e_k-e_{k-1}}{\Delta t}.
+$$
+
+The delay is represented on the numerical grid as
+
+$$
+\tau=D\Delta t,
+\qquad
+D\in\mathbb{N}.
+$$
+
+---
+
+3. Numerical Discretization
 
 The continuous-time model is discretized using Euler--Maruyama:
 
 $$
-x_{k+1} = x_k + \left( -\gamma x_k + u_{k-D} \right)\Delta t + \sigma\sqrt{\Delta t}\,\xi_k,
+x_{k+1}
+
+x_k
++
+\left(
+-\gamma x_k
++
+u_{k-D}
+\right)\Delta t
++
+\sigma\sqrt{\Delta t},\xi_k,
 $$
 
 with
 
 $$
-\xi_k \sim \mathcal{N}(0,1).
+\xi_k\sim\mathcal{N}(0,1).
 $$
 
-The implementation therefore defines a precise discrete-time stochastic model. Analytical results labelled as exact in this repository refer to this implemented finite-dimensional discrete model, not to the original continuous-time delayed SDE.
+This distinction is important:
+
+«The analytical oracle in this repository is exact for the implemented discrete-time linear-Gaussian model, not an exact solution of the original continuous-time delayed SDE.»
 
 ---
 
-3. Objective Functional
+4. Cost Functional
 
 The instantaneous quadratic cost is
 
 $$
-\ell_k = q e_k^2 + r u_k^2,
-$$
+\ell_k
 
-with $q > 0$ and $r \geq 0$.
-
-Only a fixed terminal portion of the trajectory is used for the reported objective. If the tail contains $N_{\mathrm{tail}}$ steps,
-
-$$
-J(\theta) = \frac{1}{N_{\mathrm{tail}}} \sum_{k=k_{\mathrm{tail}}}^{H-1} \ell_k,
+q e_k^2
++
+r u_k^2,
 $$
 
 where
 
 $$
-\theta = (K_p, K_d).
+q>0,
+\qquad
+r\geq0.
 $$
 
-The benchmark therefore evaluates the controller according to its mean tail cost rather than an arbitrarily selected transient value.
+The reported objective is the mean cost over a fixed tail interval.
+
+For a trajectory of $H$ steps and tail length $N_{\mathrm{tail}}$,
+
+$$
+J(\theta)
+
+\frac{1}{N_{\mathrm{tail}}}
+\sum_{k=k_{\mathrm{tail}}}^{H-1}
+\ell_k,
+$$
+
+where
+
+$$
+\theta=(K_p,K_d).
+$$
+
+For the reference configuration,
+
+$$
+\Delta t=0.01,
+\qquad
+H=600,
+$$
+
+and the tail duration is
+
+$$
+T_{\mathrm{tail}}=0.5,
+$$
+
+giving
+
+$$
+N_{\mathrm{tail}}=50.
+$$
 
 ---
 
-4. Important Equilibrium Observation
+5. Equilibrium and Target-Tracking Limitation
 
-Because the model contains damping but no integral action or explicit feed-forward compensation, the controller does not, in general, produce exact tracking of a nonzero target.
-
-For the deterministic equilibrium,
+The deterministic equilibrium satisfies
 
 $$
-0 = -\gamma x_{\mathrm{eq}} + u_{\mathrm{eq}},
+0
+
+-\gamma x_{\mathrm{eq}}
++
+u_{\mathrm{eq}}.
 $$
 
-while
+At equilibrium,
 
 $$
-u_{\mathrm{eq}} = -K_p(x_{\mathrm{eq}} - x^\star).
+e_{\mathrm{eq}}
+
+x_{\mathrm{eq}}-x^\star,
 $$
 
-Consequently,
+and therefore
 
 $$
-x_{\mathrm{eq}} = \frac{K_p}{\gamma + K_p}x^\star,
+u_{\mathrm{eq}}
+
+-K_p e_{\mathrm{eq}}.
+$$
+
+Combining these relations gives
+
+$$
+x_{\mathrm{eq}}
+
+\frac{K_p}{\gamma+K_p}x^\star,
 $$
 
 and
 
 $$
-e_{\mathrm{eq}} = -\frac{\gamma}{\gamma + K_p}x^\star.
+e_{\mathrm{eq}}
+
+-\frac{\gamma}{\gamma+K_p}x^\star.
 $$
 
-Thus, for
+Hence, for
 
 $$
-\gamma > 0, \qquad x^\star \neq 0,
+\gamma>0,
+\qquad
+x^\star\neq0,
 $$
 
-the equilibrium tracking error is generally nonzero.
+the implemented controller generally has a nonzero steady-state tracking error.
 
-This is an explicit model property and is not treated as a numerical defect.
+This is an explicit property of the model.
 
-Accordingly, this repository makes no claim of exact target tracking.
+Therefore, this repository makes no exact-target-tracking claim.
 
 ---
 
-5. Finite-Dimensional Delayed Representation
+6. Affine Controller Representation
 
-The delayed system is converted into a finite-dimensional Markov representation.
-
-For $D > 0$, define
+The controller can be rewritten as an affine function of $x_k$ and $e_{k-1}$:
 
 $$
-z_k = \begin{bmatrix}
-x_k \\
-e_{k-1} \\
-u_{k-D} \\
-u_{k-D+1} \\
-\vdots \\
+u_k
+
+a_xx_k
++
+a_ee_{k-1}
++
+a_0,
+$$
+
+with
+
+$$
+a_x
+
+-K_p-\frac{K_d}{\Delta t},
+$$
+
+$$
+a_e
+
+\frac{K_d}{\Delta t},
+$$
+
+and
+
+$$
+a_0
+
+\left(
+K_p+\frac{K_d}{\Delta t}
+\right)x^\star.
+$$
+
+V1 verifies that this affine representation is numerically equivalent to the direct controller implementation.
+
+---
+
+7. Finite-Dimensional Augmented System
+
+For $D>0$, define
+
+$$
+z_k
+
+\begin{bmatrix}
+x_k\
+e_{k-1}\
+u_{k-D}\
+u_{k-D+1}\
+\vdots\
 u_{k-1}
 \end{bmatrix}.
 $$
 
-The affine controller can be written as
+The delayed system then becomes a finite-dimensional affine stochastic recurrence,
 
 $$
-u_k = a_x x_k + a_e e_{k-1} + a_0,
+z_{k+1}
+
+Az_k+b+G\xi_k.
 $$
 
-where
+For the reference configuration $D=5$, the state dimension is
 
 $$
-a_x = -K_p - \frac{K_d}{\Delta t},
+n=D+2=7.
 $$
 
-$$
-a_e = \frac{K_d}{\Delta t},
-$$
-
-and
+The transition matrix is
 
 $$
-a_0 = \left( K_p + \frac{K_d}{\Delta t} \right)x^\star.
-$$
-
-The augmented system therefore has the form
-
-$$
-z_{k+1} = A z_k + b + G\xi_k.
-$$
-
-For $D > 0$,
-
-$$
-A = \begin{pmatrix}
-1 - \gamma\Delta t & 0 & \Delta t & 0 & \cdots & 0 \\
-1 & 0 & 0 & 0 & \cdots & 0 \\
-0 & 0 & 0 & 1 & \cdots & 0 \\
-0 & 0 & 0 & 0 & \ddots & 0 \\
-\vdots & \vdots & \vdots & \vdots & \ddots & 1 \\
+A=
+\begin{pmatrix}
+1-\gamma\Delta t & 0 & \Delta t & 0 & \cdots & 0\
+1 & 0 & 0 & 0 & \cdots & 0\
+0 & 0 & 0 & 1 & \cdots & 0\
+0 & 0 & 0 & 0 & \ddots & 0\
+\vdots & \vdots & \vdots & \vdots & \ddots & 1\
 a_x & a_e & 0 & 0 & \cdots & 0
 \end{pmatrix},
 $$
@@ -196,12 +348,13 @@ $$
 with
 
 $$
-b = \begin{bmatrix}
-0 \\
--x^\star \\
-0 \\
-\vdots \\
-0 \\
+b=
+\begin{bmatrix}
+0\
+-x^\star\
+0\
+\vdots\
+0\
 a_0
 \end{bmatrix},
 $$
@@ -209,628 +362,758 @@ $$
 and
 
 $$
-G = \begin{bmatrix}
-\sigma\sqrt{\Delta t} \\
-0 \\
-\vdots \\
+G=
+\begin{bmatrix}
+\sigma\sqrt{\Delta t}\
+0\
+\vdots\
 0
 \end{bmatrix}.
 $$
 
-The $D=0$ case is handled explicitly rather than being treated as a degenerate buffer operation.
+The $D=0$ case is handled explicitly in the implementation.
 
 ---
 
-6. Exact Discrete Linear-Gaussian Oracle
+8. Exact Linear-Gaussian Moment Oracle
 
-For fixed controller parameters, the augmented system is affine and Gaussian.
+Because the augmented system is affine with Gaussian innovations, its first two moments satisfy exact recurrences.
 
-If
-
-$$
-\mu_k = \mathbb{E}[z_k], \qquad P_k = \mathrm{Cov}(z_k),
-$$
-
-then
+Define
 
 $$
-\mu_{k+1} = A\mu_k + b,
+\mu_k
+
+\mathbb{E}[z_k],
 $$
 
 and
 
 $$
-P_{k+1} = A P_k A^\top + G G^\top.
+P_k
+
+\operatorname{Cov}(z_k).
 $$
 
-For any affine observable
+Then
 
 $$
-y_k = c^\top z_k + d,
-$$
+\mu_{k+1}
 
-its second moment is exactly
-
-$$
-\mathbb{E}[y_k^2] = (c^\top \mu_k + d)^2 + c^\top P_k c.
-$$
-
-In particular,
-
-$$
-e_k = x_k - x^\star
+A\mu_k+b,
 $$
 
 and
 
 $$
-u_k = a_x x_k + a_e e_{k-1} + a_0
+P_{k+1}
+
+AP_kA^\top
++
+GG^\top.
 $$
 
-are affine observables of the augmented state.
+For an affine observable
+
+$$
+y_k=c^\top z_k+d,
+$$
+
+the exact second moment is
+
+$$
+\mathbb{E}[y_k^2]
+
+\left(
+c^\top\mu_k+d
+\right)^2
++
+c^\top P_kc.
+$$
+
+The error and control are affine observables:
+
+$$
+e_k=x_k-x^\star,
+$$
+
+and
+
+$$
+u_k=a_xx_k+a_ee_{k-1}+a_0.
+$$
 
 Therefore,
 
 $$
-\mathbb{E}[\ell_k] = q\,\mathbb{E}[e_k^2] + r\,\mathbb{E}[u_k^2]
+\mathbb{E}[\ell_k]
+
+q,\mathbb{E}[e_k^2]
++
+r,\mathbb{E}[u_k^2]
 $$
 
-can be evaluated without Monte Carlo sampling.
+can be evaluated analytically.
 
-The resulting finite-horizon oracle is an exact analytical expectation for the implemented discrete linear-Gaussian system.
-
-It is not an exact solution of the continuous-time delayed SDE.
+The resulting oracle is exact for the finite-horizon discrete model implemented in this repository.
 
 ---
 
-7. Verification Pipeline
+9. Verification Architecture
 
-The benchmark is organized as a sequence of independently interpretable verification stages.
+The benchmark is divided into eight verification stages.
 
-V1 — Structural and Invariant Audit
+V1 — Structural / Invariant Audit
 
-Checks include:
+V1 checks:
 
-- direct controller versus affine controller equivalence,
-- initial-state definition,
-- dimensional/state representation consistency,
-- finite-value checks.
+1. direct-controller versus affine-controller equivalence;
+2. initial-state definition;
+3. structural consistency of the implementation.
 
-Result: "PASS"
+Status: "PASS"
 
 ---
 
 V2A — Deterministic One-Step Equivalence
 
-The direct simulator and the augmented matrix representation are compared for one deterministic step.
-
-For the reference configuration,
+The direct numerical update is compared with the augmented-state transition
 
 $$
-\gamma = 0.5, \qquad \sigma = 0.15, \qquad x^\star = 1, \qquad \Delta t = 0.01, \qquad D = 5,
+z_{k+1}=Az_k+b+G\xi_k.
 $$
 
-the implementation obtains
+For the reported configuration,
 
 $$
-\max |\Delta z| \approx 4.44\times 10^{-16}.
+\max|\Delta z|
+
+4.44\times10^{-16}.
 $$
 
-Result: "PASS"
+Status: "PASS"
 
 ---
 
 V2B — Deterministic Finite-Horizon Oracle
 
-The complete deterministic trajectory generated by the direct implementation is compared against the augmented-state oracle.
+The complete deterministic trajectory is compared between:
 
-For the reported configuration,
+1. the direct simulator;
+2. the augmented-state oracle.
 
-$$
-\max |\Delta z| = 7.77\times 10^{-16},
-$$
-
-$$
-\max |\Delta e| = 7.77\times 10^{-16},
-$$
+The reported maximum discrepancies are
 
 $$
-\max |\Delta u| = 2.998\times 10^{-15},
+\max|\Delta z|
+
+7.77\times10^{-16},
+$$
+
+$$
+\max|\Delta e|
+
+7.77\times10^{-16},
+$$
+
+$$
+\max|\Delta u|
+
+2.998\times10^{-15},
 $$
 
 and
 
 $$
-|\Delta J| = 1.249\times 10^{-16}.
+|\Delta J|
+
+1.249\times10^{-16}.
 $$
 
-The agreement is at floating-point roundoff level.
+These values are consistent with floating-point roundoff.
 
-Result: "PASS"
+Status: "PASS"
 
 ---
 
-V2C — Monte Carlo Versus Exact Discrete Oracle
+10. Monte Carlo Verification
 
-The Monte Carlo estimator is compared with the exact finite-horizon expectation obtained from the linear-Gaussian moment recursion.
+V2C — Monte Carlo Mean Versus Exact Oracle
 
-For $N = 4096$,
-
-$$
-J_{\mathrm{oracle}} = 0.1191530250,
-$$
-
-while the Monte Carlo estimate in the reported run was
+For $N=4096$ trajectories, the reported values are
 
 $$
-J_{\mathrm{MC}} = 0.1194963562.
+J_{\mathrm{oracle}}
+
+0.1191530250,
 $$
 
-The standardized discrepancy was
+and
 
 $$
-z \approx 0.422.
+J_{\mathrm{MC}}
+
+0.1194963562.
 $$
 
-Thus the Monte Carlo result is statistically consistent with the analytical discrete oracle.
+The standardized discrepancy is
 
-Result: "PASS"
+$$
+z\approx0.422.
+$$
+
+The result is statistically consistent with the exact discrete linear-Gaussian expectation.
+
+Status: "PASS"
 
 ---
 
 V2D — Gaussian Mean and Covariance Audit
 
-The terminal empirical mean and covariance are compared against the exact Gaussian moments.
+The terminal empirical moments are compared against the analytical Gaussian moments.
 
-The covariance comparison uses the finite-sample Gaussian covariance scale
+The reported standardized discrepancies were
 
 $$
-\mathrm{Var}(\widehat P_{ij}) \approx \frac{P_{ii}P_{jj} + P_{ij}^2}{N - 1}.
-$$
-
-The reported maximum standardized covariance discrepancy was approximately
-
-$$
-1.53.
-$$
-
-The empirical covariance was also checked for symmetry and positive semidefiniteness.
-
-Result: "PASS"
-
----
-
-V2E — Exact Moment Decomposition
-
-For each affine observable, the numerical implementation verifies
-
-$$
-\mathbb{E}[Y^2] = \left(\mathbb{E}[Y]\right)^2 + \mathrm{Var}(Y).
-$$
-
-The maximum decomposition residuals in the reported run were approximately
-
-$$
-1.25\times 10^{-16}
-$$
-
-for the error and
-
-$$
-2.78\times 10^{-17}
-$$
-
-for the control.
-
-Result: "PASS"
-
----
-
-8. Automatic Differentiation Verification
-
-V3 — AD Versus Central Finite Difference
-
-The JAX automatic gradient is independently compared with a central finite-difference approximation using the same Monte Carlo realization.
-
-For step sizes
-
-$$
-h \in \{ 10^{-2}, 3\times 10^{-3}, 10^{-3}, 3\times 10^{-4}, 10^{-4}, 3\times 10^{-5}, 10^{-5} \},
-$$
-
-the relative discrepancy decreases into the numerical roundoff regime.
-
-At
-
-$$
-h = 10^{-5},
-$$
-
-the reported relative $L^2$ discrepancy was
-
-$$
-8.96\times 10^{-11}.
-$$
-
-This provides numerical evidence that the implemented computational graph is differentiated consistently.
-
-It does not constitute a general mathematical proof of automatic differentiation correctness.
-
-Result: "PASS"
-
----
-
-9. Monte Carlo Scaling
-
-V4 — Empirical $N^{-1/2}$ Scaling
-
-The Monte Carlo estimator was evaluated over the predefined sample sizes
-
-$$
-N \in \{ 128, 256, 512, 1024, 2048, 4096 \}.
-$$
-
-The empirical regression
-
-$$
-\log(\mathrm{SD}) = \alpha\log(N) + c
-$$
-
-gave
-
-$$
-\alpha \approx -0.475,
-$$
-
-with
-
-$$
-R^2 \approx 0.962.
-$$
-
-The bootstrap confidence interval for the fitted exponent contained
-
-$$
--\frac{1}{2}.
-$$
-
-This is consistent with the expected Monte Carlo scaling
-
-$$
-\mathrm{SD} \propto N^{-1/2}
-$$
-
-over the tested finite sample range.
-
-It is not a proof of an asymptotic central-limit theorem or universal $N^{-1/2}$ behavior.
-
-Result: "PASS"
-
----
-
-10. Timestep Refinement
-
-V5 — Fixed Physical Delay and Horizon
-
-The timestep was refined while keeping the physical delay
-
-$$
-\tau = 0.05
-$$
-
-and physical simulation horizon fixed.
-
-The tested timesteps were
-
-$$
-\Delta t \in \{ 0.01, 0.005, 0.0025, 0.00125 \},
-$$
-
-with reference timestep
-
-$$
-\Delta t_{\mathrm{ref}} = 0.000625.
-$$
-
-The corresponding delay-grid sizes were
-
-$$
-D \in \{ 5, 10, 20, 40, 80 \}.
-$$
-
-Nested Brownian increments were used so that coarse Brownian increments are constructed consistently from the finer realization.
-
-The reported objective errors decreased monotonically with refinement:
-
-$$
-2.297\times 10^{-3}, \quad 1.832\times 10^{-3}, \quad 1.472\times 10^{-3}, \quad 9.897\times 10^{-4}.
-$$
-
-The global log-log empirical order was approximately
-
-$$
-p \approx 0.396,
-$$
-
-with
-
-$$
-R^2 \approx 0.977.
-$$
-
-This demonstrates numerical refinement toward the selected finer-resolution reference along the tested realization.
-
-It does not constitute a formal Euler--Maruyama convergence proof.
-
-Result: "PASS"
-
----
-
-11. Discrete Stability and Stationary Moments
-
-V6 — Augmented-System Stability
-
-For the baseline controller,
-
-$$
-(K_p, K_d) = (1, 0.1),
-$$
-
-the spectral radius of the augmented transition matrix was
-
-$$
-\rho(A) = 0.9858055971.
-$$
-
-Since
-
-$$
-\rho(A) < 1,
-$$
-
-the tested discrete augmented system is Schur-stable.
-
-The corresponding stability margin is
-
-$$
-1 - \rho(A) = 0.0141944029.
-$$
-
-The stationary mean agrees with the structural equilibrium:
-
-$$
-\mu_x = 0.6666666667,
-$$
-
-$$
-\mu_e = -0.3333333333,
-$$
-
-$$
-\mu_u \approx 0.3333333333.
-$$
-
-The covariance recursion converges to a numerically consistent fixed point satisfying the discrete Lyapunov equation
-
-$$
-P_\infty = A P_\infty A^\top + G G^\top.
-$$
-
-Result: "PASS"
-
-Scope of the stability result
-
-This verifies the implemented discrete augmented linear system for the tested parameter configuration.
-
-It does not establish:
-
-- stability for arbitrary controller gains,
-- a continuous-time delay stability theorem,
-- nonlinear stochastic stability,
-- robustness under model uncertainty,
-- or physical-system stability.
-
----
-
-12. Stochastic Projected Optimization
-
-V7 — Projected Stochastic Gradient Benchmark
-
-The controller parameters
-
-$$
-\theta = (K_p, K_d)
-$$
-
-are optimized numerically according to
-
-$$
-\theta_{n+1} = \Pi_{\Theta} \left[ \theta_n - \eta\widehat{\nabla J}(\theta_n) \right],
-$$
-
-where $\Pi_\Theta$ projects onto the predefined feasible parameter domain.
-
-The benchmark uses:
-
-- multiple independent optimization seeds,
-- fresh Monte Carlo noise during optimization,
-- a fixed evaluation batch,
-- an independent diagnostic batch,
-- JAX automatic differentiation,
-- explicit parameter projection,
-- no post-hoc parameter correction,
-- no hidden objective modification.
-
-The four optimization seeds produced final gains clustered around
-
-$$
-K_p \approx 1.413,
-$$
-
-$$
-K_d \approx 0.112.
-$$
-
-The fixed evaluation batch showed approximately $35.6\% - 35.9\%$ improvement relative to the baseline.
-
-The projected-gradient mapping decreased over the optimization budget, but its final value remained substantially above the predefined stationarity tolerance.
-
-Therefore, the optimization result is not described as a proven stationary point or global optimum.
-
-Result: "PASS"
-
----
-
-13. Independent Out-of-Sample Evaluation
-
-V8 — Frozen Candidate OOS Test
-
-After optimization, the candidate controller is frozen before the independent evaluation.
-
-The selected candidate was
-
-$$
-\boxed{
-K_p = 1.4143864328, \qquad K_d = 0.1157534854
-}
-$$
-
-and was selected from the predefined fixed evaluation procedure.
-
-The independent OOS test uses
-
-$$
-N = 8192
-$$
-
-trajectories with seed
-
-$$
-909090.
-$$
-
-The baseline and candidate use exactly the same OOS noise realizations, enabling a paired comparison.
-
-The resulting mean costs were
-
-$$
-J_{\mathrm{baseline}} = 0.1191735230,
+\max |Z_{\mathrm{mean}}|
+\approx1.14,
 $$
 
 and
 
 $$
-J_{\mathrm{candidate}} = 0.0748907557.
+\max |Z_{\mathrm{cov}}|
+\approx1.53.
 $$
 
-The paired mean difference was
+The empirical covariance is also checked for:
+
+- symmetry;
+- positive semidefiniteness;
+- finite entries.
+
+Status: "PASS"
+
+---
+
+V2E — Exact Moment Decomposition
+
+The implementation verifies the identity
 
 $$
-\Delta J = J_{\mathrm{candidate}} - J_{\mathrm{baseline}} = -0.0442827673.
+\mathbb{E}[Y^2]
+
+\left(\mathbb{E}[Y]\right)^2
++
+\operatorname{Var}(Y)
 $$
 
-The relative improvement was
+for the affine error and control observables.
+
+The reported maximum decomposition residuals are approximately
 
 $$
-\boxed{37.16\%}
+1.25\times10^{-16}
 $$
 
-and the candidate won on all $8192$ paired trajectories in the reported run.
-
-The normal 95% confidence interval for the paired mean difference was
+for the error and
 
 $$
-[-0.0446596, -0.0439059],
+2.78\times10^{-17}
 $$
 
-while the bootstrap 95% interval was
+for the control.
+
+Status: "PASS"
+
+---
+
+11. Automatic Differentiation Verification
+
+V3 — AD Versus Central Finite Difference
+
+The JAX automatic gradient is compared with central finite differences,
 
 $$
-[-0.0446636, -0.0439019].
+\frac{\partial J}{\partial\theta_i}
+\approx
+\frac{
+J(\theta+h e_i)
+
+J(\theta-h e_i)
+}{
+2h
+},
+$$
+
+using common random numbers.
+
+The tested step sizes are
+
+$$
+h\in
+\left{
+10^{-2},
+3\times10^{-3},
+10^{-3},
+3\times10^{-4},
+10^{-4},
+3\times10^{-5},
+10^{-5}
+\right}.
+$$
+
+At
+
+$$
+h=10^{-5},
+$$
+
+the relative $L^2$ discrepancy was
+
+$$
+8.96\times10^{-11}.
+$$
+
+This provides strong numerical evidence of consistency between the implemented computational graph and its JAX derivative.
+
+It is not a general mathematical proof of automatic differentiation correctness.
+
+Status: "PASS"
+
+---
+
+12. Monte Carlo Scaling
+
+V4 — Empirical $N^{-1/2}$ Scaling
+
+The Monte Carlo sample sizes are
+
+$$
+N=
+128,;256,;512,;1024,;2048,;4096.
+$$
+
+The empirical relationship
+
+$$
+\operatorname{SD}(\widehat J)
+\propto
+N^\alpha
+$$
+
+was fitted on a log-log scale.
+
+The reported exponent is
+
+$$
+\alpha=-0.4746,
+$$
+
+with
+
+$$
+R^2=0.9624.
+$$
+
+The bootstrap confidence interval for the exponent contains
+
+$$
+-\frac12.
+$$
+
+Thus the observed scaling is consistent with the standard Monte Carlo prediction over the tested finite sample range.
+
+This is an empirical numerical observation, not a proof of asymptotic Monte Carlo convergence or a central-limit theorem.
+
+Status: "PASS"
+
+---
+
+13. Timestep Refinement
+
+V5 — Fixed Physical Delay and Horizon
+
+The physical delay is held fixed:
+
+$$
+\tau=0.05.
+$$
+
+The physical simulation horizon is also held fixed.
+
+The tested timesteps are
+
+$$
+\Delta t
+\in
+\left{
+0.01,;
+0.005,;
+0.0025,;
+0.00125
+\right},
+$$
+
+with reference timestep
+
+$$
+\Delta t_{\mathrm{ref}}=0.000625.
+$$
+
+The corresponding delay-grid sizes are
+
+$$
+D=
+5,;10,;20,;40,;80.
+$$
+
+Nested Brownian refinement is used so that coarse increments are constructed consistently from the finer Brownian realization.
+
+The observed errors relative to the reference decrease monotonically:
+
+$$
+2.297\times10^{-3},
+\quad
+1.832\times10^{-3},
+\quad
+1.472\times10^{-3},
+\quad
+9.897\times10^{-4}.
+$$
+
+The empirical global order is approximately
+
+$$
+p=0.396,
+$$
+
+with
+
+$$
+R^2=0.977.
+$$
+
+This supports numerical refinement toward the selected finer-resolution reference along the tested realization.
+
+It does not establish a formal Euler--Maruyama convergence theorem.
+
+Status: "PASS"
+
+---
+
+14. Discrete Stability
+
+V6 — Augmented-System Stability and Stationary Moments
+
+For the predefined baseline
+
+$$
+(K_p,K_d)=(1,0.1),
+$$
+
+the augmented transition matrix has spectral radius
+
+$$
+\rho(A)=0.9858055971.
+$$
+
+Since
+
+$$
+\rho(A)<1,
+$$
+
+the tested discrete augmented system is Schur-stable.
+
+The stability margin is
+
+$$
+1-\rho(A)
+
+0.0141944029.
+$$
+
+The stationary mean agrees with the structural equilibrium:
+
+$$
+\mu_x
+
+0.6666666667,
+$$
+
+$$
+\mu_e
+
+-0.3333333333,
+$$
+
+$$
+\mu_u
+\approx
+0.3333333333.
+$$
+
+The stationary covariance satisfies the discrete Lyapunov equation
+
+$$
+P_\infty
+
+AP_\infty A^\top
++
+GG^\top
+$$
+
+to numerical tolerance.
+
+Status: "PASS"
+
+Stability claim boundary
+
+This result establishes Schur stability only for the implemented discrete augmented system at the tested parameter configuration.
+
+It does not establish:
+
+- stability for arbitrary $(K_p,K_d)$;
+- continuous-time delay stability;
+- nonlinear stochastic stability;
+- robustness under model uncertainty;
+- physical-system stability.
+
+---
+
+15. Stochastic Optimization
+
+V7 — Projected Stochastic Gradient Optimization
+
+The controller parameters are optimized using
+
+$$
+\theta_{n+1}
+
+\Pi_\Theta
+\left[
+\theta_n
+
+\eta\widehat{\nabla J}(\theta_n)
+\right],
+$$
+
+where $\Pi_\Theta$ is the explicit projection onto the predefined feasible parameter domain.
+
+The optimization protocol uses:
+
+- multiple independent seeds;
+- fresh Monte Carlo noise during optimization;
+- a fixed evaluation batch;
+- an independent diagnostic batch;
+- JAX automatic differentiation;
+- explicit parameter projection;
+- a fixed optimization budget.
+
+The final gains across the four optimization seeds cluster around
+
+$$
+K_p\approx1.413,
+$$
+
+and
+
+$$
+K_d\approx0.112.
+$$
+
+The fixed evaluation batch showed approximately $35.6%-35.9%$ improvement relative to the baseline for the four final iterates.
+
+The projected-gradient mapping decreased during optimization.
+
+However, the final projected-gradient norms remain substantially above the predefined stationarity tolerance.
+
+Therefore:
+
+«The optimization is reported as a successful numerical improvement procedure, not as a proof of convergence to a stationary point or global optimum.»
+
+Status: "PASS"
+
+---
+
+16. Independent Out-of-Sample Evaluation
+
+V8 — Frozen Candidate Evaluation
+
+After the optimization stage, the candidate controller is frozen before the independent evaluation.
+
+The selected candidate is
+
+$$
+\boxed{
+(K_p,K_d)
+
+(1.4143864328,;0.1157534854)
+}.
+$$
+
+The predefined baseline is
+
+$$
+(K_p,K_d)_{\mathrm{base}}
+
+(1.0,;0.1).
+$$
+
+The independent OOS evaluation uses
+
+$$
+N=8192
+$$
+
+trajectories with a separate seed.
+
+The baseline and candidate are evaluated on exactly the same noise realizations, producing a paired comparison.
+
+The measured mean costs are
+
+$$
+J_{\mathrm{base}}
+
+0.1191735230,
+$$
+
+and
+
+$$
+J_{\mathrm{cand}}
+
+0.0748907557.
+$$
+
+The paired mean difference is
+
+$$
+\Delta J
+
+J_{\mathrm{cand}}
+
+J_{\mathrm{base}}
+
+-0.0442827673.
+$$
+
+The relative improvement is therefore
+
+$$
+\boxed{
+37.16%
+}.
+$$
+
+The paired 95% normal confidence interval is
+
+$$
+[-0.0446596,,-0.0439059],
+$$
+
+and the bootstrap 95% confidence interval is
+
+$$
+[-0.0446636,,-0.0439019].
 $$
 
 Both intervals exclude zero.
 
-The exact finite-horizon linear-Gaussian oracle independently predicts
-
-$$
-J_{\mathrm{baseline}}^{\mathrm{oracle}} = 0.1191530250,
-$$
-
-$$
-J_{\mathrm{candidate}}^{\mathrm{oracle}} = 0.0748660888,
-$$
-
-with an oracle relative improvement of approximately
-
-$$
-37.17\%.
-$$
-
-Thus, the independent Monte Carlo result and the analytical discrete oracle agree in direction and magnitude.
-
-Result: "PASS"
+The candidate won on all $8192$ paired trajectories in the reported run.
 
 ---
 
-14. Verification Summary
+17. Independent Analytical Cross-Check
 
-| Verification | Result | Interpretation |
-| :--- | :--- | :--- |
-| V1 Structural / invariant audit | PASS | Direct and structural definitions agree |
-| V2A One-step equivalence | PASS | Augmented transition agrees with direct dynamics |
-| V2B Deterministic oracle | PASS | Finite-horizon trajectory agrees to roundoff |
-| V2C MC vs analytical oracle | PASS | MC estimate is statistically consistent |
-| V2D Gaussian moments | PASS | Empirical moments agree with Gaussian prediction |
-| V2E Moment decomposition | PASS | Second-moment identity verified |
-| V3 AD vs finite difference | PASS | Numerical gradient consistency demonstrated |
-| V4 Monte Carlo scaling | PASS | Empirical $N^{-1/2}$ scaling supported |
-| V5 Timestep refinement | PASS | Objective approaches finer reference |
-| V6 Stability / stationary moments | PASS | Tested discrete system is Schur-stable |
-| V7 Stochastic optimization | PASS | Reproducible improvement across seeds |
-| V8 Independent OOS test | PASS | Frozen candidate improves independent evaluation |
+The exact finite-horizon linear-Gaussian oracle independently gives
+
+$$
+J_{\mathrm{base}}^{\mathrm{oracle}}
+
+0.1191530250,
+$$
+
+and
+
+$$
+J_{\mathrm{cand}}^{\mathrm{oracle}}
+
+0.0748660888.
+$$
+
+The corresponding oracle improvement is approximately
+
+$$
+37.17%.
+$$
+
+The agreement between the OOS Monte Carlo result and the analytical oracle provides an independent consistency check on the reported direction and magnitude of the improvement.
+
+Status: "PASS"
 
 ---
 
-15. Main Numerical Result
+18. Summary of Verification Results
 
-For the tested model and numerical configuration,
+Stage| Status| Primary purpose
+V1| PASS| Structural and invariant consistency
+V2A| PASS| One-step augmented-system equivalence
+V2B| PASS| Deterministic finite-horizon oracle
+V2C| PASS| Monte Carlo versus exact oracle
+V2D| PASS| Gaussian mean/covariance consistency
+V2E| PASS| Exact second-moment decomposition
+V3| PASS| AD versus finite-difference gradient
+V4| PASS| Empirical Monte Carlo scaling
+V5| PASS| Timestep refinement
+V6| PASS| Discrete stability and stationary moments
+V7| PASS| Stochastic optimization reproducibility
+V8| PASS| Independent frozen-candidate evaluation
+
+---
+
+19. Main Numerical Result
+
+For the explicitly specified model and numerical protocol, the frozen candidate
 
 $$
 \boxed{
-(K_p, K_d) = (1.4143864328, 0.1157534854)
+(K_p,K_d)
+
+(1.4143864328,;0.1157534854)
 }
 $$
 
-produced a lower independent OOS tail cost than the predefined baseline
+achieved a lower independent OOS tail cost than the predefined baseline
 
 $$
-(K_p, K_d)_{\mathrm{baseline}} = (1, 0.1).
+(K_p,K_d)=(1,0.1).
 $$
 
-The measured OOS improvement was
+The observed improvement was
 
 $$
-\boxed{37.16\%}.
+\boxed{37.16%}.
 $$
 
-The result is independently supported by the exact finite-horizon linear-Gaussian oracle for the implemented discrete model.
+The same qualitative result is independently reproduced by the exact finite-horizon linear-Gaussian oracle.
 
 ---
 
-16. Claim Boundary
+20. Claim Boundary
 
-The results support the following claim:
+The numerical evidence supports the following claim:
 
-«Under the explicitly defined delayed stochastic model, discretization, controller class, parameter domain, objective functional, optimization protocol, and independent OOS evaluation procedure, the frozen candidate controller achieved a lower mean tail cost than the predefined baseline.»
+«Under the explicitly defined delayed stochastic model, discretization, controller class, feasible parameter domain, objective functional, optimization protocol, and independent OOS evaluation procedure, the frozen candidate controller achieved a lower mean tail cost than the predefined baseline.»
 
-The evidence does not establish:
+The study does not establish:
 
 - global optimality;
-- uniqueness of the reported controller;
-- universal superiority over the baseline;
-- optimality for the continuous-time delayed SDE;
-- convergence of the stochastic optimization algorithm to a global optimum;
+- uniqueness of the candidate;
+- universal superiority;
+- continuous-time optimality;
+- convergence of the optimization algorithm to a global optimum;
 - a general continuous-time delay-stability theorem;
 - nonlinear stochastic stability;
 - robustness to arbitrary model uncertainty;
@@ -838,85 +1121,120 @@ The evidence does not establish:
 - experimental validation;
 - exact target tracking.
 
-The reported $37.16\%$ improvement should therefore be interpreted strictly as a numerical result for the tested model and protocol.
+The reported $37.16%$ improvement is therefore a result for the specified model and computational protocol, not a universal control-law claim.
 
 ---
 
-17. Reproducibility
+21. Reproducibility
 
-The benchmark uses deterministic seed management and explicitly records:
+The benchmark explicitly records:
 
 - JAX version;
 - 64-bit configuration;
 - model parameters;
 - timestep;
 - delay;
-- horizon;
+- physical horizon;
 - tail-window definition;
 - controller parameters;
-- optimization seeds;
-- Monte Carlo seeds;
-- OOS seed;
-- sample sizes;
+- random seeds;
+- Monte Carlo sample sizes;
+- optimization configuration;
 - verification tolerances;
-- numerical diagnostics.
+- OOS evaluation configuration.
 
-The reference implementation is intended to run as a self-contained JAX workflow without requiring hidden state from previous notebook cells.
+The implementation is designed as a self-contained JAX workflow suitable for a Google Colab environment.
 
-The computational pipeline does not use:
+The numerical pipeline does not use:
 
-- "nan_to_num" masking;
+- "nan_to_num";
 - silent numerical fallback;
-- hidden parameter corrections;
-- undocumented hard-coded physical corrections;
-- post-hoc candidate modification;
-- cosmetic metric substitution.
+- hidden parameter correction;
+- undocumented physical correction;
+- post-hoc modification of the selected candidate;
+- cosmetic replacement of failed diagnostics.
 
-Parameter projection is used only where explicitly defined as part of the optimization problem.
+The only clipping/projection operation is the explicitly defined parameter projection
+
+$$
+\Pi_\Theta:\mathbb{R}^2\rightarrow\Theta
+$$
+
+used as part of the optimization algorithm.
 
 ---
 
-18. Computational Environment
+22. Computational Environment
 
-The reference benchmark was executed with:
+The reported benchmark was executed using:
 
 JAX version : 0.11.1
 x64 enabled : True
 
-The implementation uses:
+The implementation is based on:
 
+- Python
 - JAX
 - NumPy
-- Python standard library
 
-and is intended to be compatible with a Google Colab-style environment.
+and is intended to run in a standard Google Colab environment.
 
 ---
 
-19. Scientific Scope
+23. Scientific Interpretation
 
-This repository should be understood as a numerical verification and benchmarking study, rather than a claim of a new control-theoretic theorem.
+The principal result of this repository is not simply the numerical value of the optimized controller.
 
-Its main methodological purpose is to demonstrate a reproducible chain:
+The more important methodological result is the complete verification chain:
 
 $$
 \boxed{
-\text{Model} \rightarrow \text{Discretization} \rightarrow \text{Implementation} \rightarrow \text{Analytical Oracle} \rightarrow \text{Numerical Verification} \rightarrow \text{Optimization} \rightarrow \text{Independent OOS Test}
+\begin{aligned}
+\text{Model}
+&\rightarrow
+\text{Discretization}
+\rightarrow
+\text{Implementation}\
+&\rightarrow
+\text{Exact Oracle}
+\rightarrow
+\text{Independent Checks}\
+&\rightarrow
+\text{Optimization}
+\rightarrow
+\text{Frozen OOS Evaluation}.
+\end{aligned}
 }
 $$
 
-with explicit separation between what is analytically established, what is numerically verified, what is empirically observed, and what remains outside the scope of the study.
+This structure separates:
+
+- analytical identities;
+- numerical consistency checks;
+- statistical evidence;
+- optimization observations;
+- independent validation;
+- and claims that remain outside the demonstrated scope.
+
+The repository should therefore be interpreted as a reproducible computational verification benchmark for delayed stochastic control, rather than as a proof of a new optimal-control theorem.
 
 ---
 
-20. Status
+24. Final Status
 
-Full verification pipeline: "PASS"
+V1  PASS
+V2A PASS
+V2B PASS
+V2C PASS
+V2D PASS
+V2E PASS
+V3  PASS
+V4  PASS
+V5  PASS
+V6  PASS
+V7  PASS
+V8  PASS
 
-All predefined verification stages V1--V8 passed in the reported run.
+FULL PIPELINE STATUS: PASS
 
-The appropriate interpretation is:
-
-«A reproducible numerical benchmark demonstrating internal consistency, analytical-oracle agreement, numerical differentiation consistency, empirical Monte Carlo scaling, timestep refinement, tested discrete stability, stochastic optimization reproducibility, and independent out-of-sample improvement for the specified delayed stochastic control model.»
-
-It is not a proof of globally optimal stochastic control and should not be interpreted as such.
+The reported result is numerically supported within the explicitly defined scope of the benchmark.
