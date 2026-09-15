@@ -966,4 +966,4 @@ The corresponding analytical finite-horizon oracle predicts approximately **$37.
 These results support the claim of numerical superiority over the predefined baseline under the tested model and protocol.
 
 They do not establish global optimality, universal superiority, continuous-time optimality, or physical validity.
-```
+
